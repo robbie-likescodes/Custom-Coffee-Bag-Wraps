@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Coffee Bag Wrap Builder</title>
+
+<!-- Minimal, warm, modern styles -->
+<style>
+  :root{
+    --bg:#0e0e0e; --panel:#121316; --ink:#f3f4f6; --muted:#a3a7ad;
+    --line:#23272d; --accent:#de3a3a; --focus:#3aa6ff;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .topbar{display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--line); background:#0e1012}
+  .topbar h1{margin:0; font-size:16px; letter-spacing:.5px}
+  .actions{display:flex; gap:8px; align-items:center}
+  .btn{padding:9px 12px; border:1px solid var(--line); background:var(--panel); color:var(--ink); border-radius:10px; cursor:pointer}
+  .btn:hover{border-color:#3a4047}
+  .btn.primary{background:var(--accent); border-color:var(--accent)}
+  .btn.ghost{background:transparent}
+  .layout{display:grid; grid-template-columns:340px 1fr; height:calc(100vh - 52px)}
+  .panel{overflow:auto; padding:14px; border-right:1px solid var(--line); background:#101215}
+  .panel h2{margin:10px 0 8px}
+  .panel p{color:var(--muted)}
+  .section{border:1px solid var(--line); border-radius:12px; margin-bottom:12px; background:#0f1113}
+  .section header{display:flex; justify-content:space-between; align-items:center; padding:10px 12px; cursor:pointer; user-select:none}
+  .section header h3{margin:0; font-size:14px}
+  .section .content{padding:12px; border-top:1px solid var(--line)}
+  .row{display:flex; align-items:center; gap:10px; margin:8px 0}
+  label.small{width:84px; color:var(--muted)}
+  input[type="file"], input[type="color"], input[type="range"], input[type="text"], textarea, select{
+    width:100%; background:#121418; color:var(--ink); border:1px solid var(--line); border-radius:10px; padding:8px;
+  }
+  input[type="range"]{padding:0}
+  .stickers{display:grid; grid-template-columns:repeat(4,1fr); gap:8px}
+  .stickers button{border:1px solid var(--line); background:#111316; border-radius:8px; padding:6px; cursor:pointer}
+  .stickers button.active{outline:2px solid var(--accent)}
+  .stickers img{width:100%; aspect-ratio:1/1; object-fit:contain}
+  .viewport{position:relative; display:grid; place-items:center}
+  #three{width:100%; height:100%; display:block}
+  #flatCanvas{position:absolute; inset:0; width:100%; height:100%; display:none; background:#fff}
+  .toggles{display:flex; gap:8px; flex-wrap:wrap}
+  .hint{color:var(--muted); font-size:12px}
+  .help{margin-top:10px; padding:10px; border:1px solid var(--line); border-radius:10px; background:#121416}
+  .toast{position:fixed; left:50%; transform:translateX(-50%); bottom:14px; background:#161a1e; border:1px solid #2a2f35; color:#eaecef; padding:10px 14px; border-radius:10px; opacity:0; pointer-events:none; transition:opacity .2s}
+  .toast.show{opacity:1}
+  @media(max-width:980px){
+    .layout{grid-template-columns:1fr}
+    .panel{order:2; height:52vh}
+    .viewport{order:1; height:48vh}
+  }
+</style>
+
+<!-- three.js + examples -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/examples/jsm/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<!-- JSZip for client-side ZIP download -->
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script>
+
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Wrap Builder</h1>
+  <div class="actions">
+    <button id="downloadPreviewBtn" class="btn">Download 3D Preview</button>
+    <button id="downloadWrapBtn" class="btn">Download Flat Wrap</button>
+    <button id="downloadZipBtn" class="btn">Download ZIP</button>
+    <a id="mailtoLink" class="btn ghost" href="#">Email Us</a>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="panel">
+    <div class="section" data-open>
+      <header><h3>Background</h3><span class="hint">full bleed</span></header>
+      <div class="content">
+        <div class="row"><input type="file" id="bgInput" accept="image/*" /></div>
+        <div class="row">
+          <label class="small">Solid</label><input type="color" id="bgColor" value="#ffffff" />
+        </div>
+        <div class="row">
+          <button id="exampleBgBtn" class="btn">Load Example</button>
+          <button id="clearBgBtn" class="btn">Clear</button>
+        </div>
+        <p class="hint">Tip: big images look best (≥3300×3600 px).</p>
+      </div>
+    </div>
+
+    <div class="section" data-open>
+      <header><h3>Stickers</h3><span class="hint">add + place on bag</span></header>
+      <div class="content">
+        <div class="row"><input type="file" id="stickerInput" accept="image/*" /></div>
+        <div class="stickers" id="stickerList"></div>
+        <div class="row">
+          <label class="small">Size</label><input id="size" type="range" min="0.05" max="1.5" step="0.01" value="0.35" />
+        </div>
+        <div class="row">
+          <label class="small">Rotate</label><input id="rotate" type="range" min="-180" max="180" step="1" value="0" />
+        </div>
+        <div class="row toggles">
+          <button id="deleteStickerBtn" class="btn">Delete</button>
+          <button id="clearAllBtn" class="btn">Clear All</button>
+        </div>
+        <p id="dpiNote" class="hint"></p>
+      </div>
+    </div>
+
+    <div class="section" data-open>
+      <header><h3>Guides & View</h3><span class="hint">setup</span></header>
+      <div class="content">
+        <div class="row toggles">
+          <label><input type="checkbox" id="guidesToggle" checked /> Show guides</label>
+          <label><input type="checkbox" id="paperTextureToggle" /> Paper texture</label>
+          <label><input type="checkbox" id="flatToggle" /> Flat view</label>
+        </div>
+        <div class="row">
+          <label class="small">Export DPI</label>
+          <select id="dpiSelect">
+            <option value="300" selected>300 (Print)</option>
+            <option value="200">200</option>
+            <option value="150">150 (Web)</option>
+          </select>
+        </div>
+        <p class="hint">Drag on the bag to move the active sticker. Use size/rotate above.</p>
+      </div>
+    </div>
+
+    <div class="section" data-open>
+      <header><h3>Order</h3><span class="hint">manual email</span></header>
+      <div class="content">
+        <p>1) Download both files.<br/>2) Click <a id="mailtoLink2" href="#">Email Us</a> to open your mail app.<br/>3) Attach the PNGs and send.</p>
+        <p class="hint">Nothing is uploaded—everything runs in your browser.</p>
+      </div>
+    </div>
+
+    <div class="help">
+      <strong>Shortcuts:</strong> <span class="hint">[R]otate +/− 15°, [=]/[-] size ±, [Del] delete, [G] toggles guides, [V] 3D/Flat.</span>
+    </div>
+  </aside>
+
+  <section class="viewport">
+    <canvas id="three"></canvas>
+    <canvas id="flatCanvas"></canvas>
+  </section>
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+
+/* ------------------------ Config ------------------------ */
+const CONFIG = {
+  EMAIL: 'orders@yourdomain.com', // TODO set your real email
+  // Print canvas (panel widths @ 300 dpi): 2.0" | 3.25" | 2.0" | 3.25" | 0.5"
+  BASE_W: 3300,  // total width px @ 300dpi
+  BASE_H: 3600,  // total height px @ 300dpi
+  PANEL_X: [600, 1575, 2175, 3150], // vertical guide lines
+  BLEED_PX: Math.round(0.125 * 300),
+  BAG: { W:3.25, H:10.5, D:2.0 } // inches (ratios matter)
+};
+
+/* ------------------- State & Elements ------------------- */
+const toastEl = document.getElementById('toast');
+const threeCanvas = document.getElementById('three');
+const flatCanvas = document.getElementById('flatCanvas');
+
+const bgInput = document.getElementById('bgInput');
+const bgColor = document.getElementById('bgColor');
+const exampleBgBtn = document.getElementById('exampleBgBtn');
+const clearBgBtn = document.getElementById('clearBgBtn');
+
+const stickerInput = document.getElementById('stickerInput');
+const stickerList = document.getElementById('stickerList');
+const sizeSlider = document.getElementById('size');
+const rotateSlider = document.getElementById('rotate');
+const deleteStickerBtn = document.getElementById('deleteStickerBtn');
+const clearAllBtn = document.getElementById('clearAllBtn');
+const dpiNote = document.getElementById('dpiNote');
+
+const guidesToggle = document.getElementById('guidesToggle');
+const paperTextureToggle = document.getElementById('paperTextureToggle');
+const flatToggle = document.getElementById('flatToggle');
+const dpiSelect = document.getElementById('dpiSelect');
+
+const downloadPreviewBtn = document.getElementById('downloadPreviewBtn');
+const downloadWrapBtn = document.getElementById('downloadWrapBtn');
+const downloadZipBtn = document.getElementById('downloadZipBtn');
+const mailtoLink  = document.getElementById('mailtoLink');
+const mailtoLink2 = document.getElementById('mailtoLink2');
+
+/* ----------------- Wrap Canvas (offscreen) --------------- */
+let WRAP_W = CONFIG.BASE_W, WRAP_H = CONFIG.BASE_H;
+const wrapCanvas = document.createElement('canvas');
+wrapCanvas.width = WRAP_W; wrapCanvas.height = WRAP_H;
+const wrapCtx = wrapCanvas.getContext('2d');
+
+const displayCtx = flatCanvas.getContext('2d');
+
+/* ------------- Sticker Model & Persistence --------------- */
+let stickers = []; // {id, img, src, u, v, s, r, w, h}
+let activeStickerId = null;
+let backgroundDataUrl = null; // for restore
+
+function saveState(){
+  const data = {
+    stickers: stickers.map(s => ({id:s.id, src:s.src, u:s.u, v:s.v, s:s.s, r:s.r})),
+    bg: backgroundDataUrl,
+    bgColor: bgColor.value,
+    dpi: dpiSelect.value,
+    guides: guidesToggle.checked,
+    paper: paperTextureToggle.checked
+  };
+  localStorage.setItem('wrap-builder:v1', JSON.stringify(data));
+}
+async function restoreState(){
+  try{
+    const raw = localStorage.getItem('wrap-builder:v1');
+    if(!raw) return;
+    const data = JSON.parse(raw);
+    if(data.bgColor) bgColor.value = data.bgColor;
+    if(data.dpi) dpiSelect.value = data.dpi, setDPI(parseInt(data.dpi,10));
+    if(typeof data.guides === 'boolean') guidesToggle.checked = data.guides;
+    if(typeof data.paper === 'boolean') paperTextureToggle.checked = data.paper;
+    if(data.bg){
+      backgroundDataUrl = data.bg;
+      await drawBackgroundFromDataUrl(data.bg);
+    }else{
+      fillBackgroundColor(bgColor.value);
+    }
+    if(Array.isArray(data.stickers)){
+      stickers = await Promise.all(data.stickers.map(loadStickerFromState));
+      activeStickerId = stickers[0]?.id ?? null;
+      refreshStickerList();
+      redrawAll();
+    }
+  }catch(e){ console.warn('Restore failed', e); fillBackgroundColor(bgColor.value); }
+}
+function loadStickerFromState(s){ 
+  return new Promise((resolve,reject)=>{
+    const img = new Image();
+    img.onload = ()=> resolve({ ...s, img, w:img.naturalWidth, h:img.naturalHeight });
+    img.onerror = reject;
+    img.src = s.src;
+  });
+}
+
+/* ------------------- three.js scene ---------------------- */
+const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, antialias:true, preserveDrawingBuffer:true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(threeCanvas.clientWidth, threeCanvas.clientHeight, false);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0c0d0e);
+
+const camera = new THREE.PerspectiveCamera(35, threeCanvas.clientWidth/threeCanvas.clientHeight, 0.1, 200);
+camera.position.set(0, CONFIG.BAG.H*0.5, CONFIG.BAG.H*1.35);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+const key = new THREE.DirectionalLight(0xffffff, 1.0); key.position.set(2, 6, 8); scene.add(key);
+
+const geom = new RoundedBoxGeometry(CONFIG.BAG.W, CONFIG.BAG.H, CONFIG.BAG.D, 6, 0.18);
+
+const wrapTexture = new THREE.CanvasTexture(wrapCanvas);
+wrapTexture.anisotropy = 8;
+wrapTexture.wrapS = wrapTexture.wrapT = THREE.ClampToEdgeWrapping;
+
+const mat = new THREE.MeshPhysicalMaterial({
+  map: wrapTexture, roughness: 0.72, metalness: 0.0, clearcoat: 0.25, clearcoatRoughness: 0.6
+});
+const bag = new THREE.Mesh(geom, mat);
+scene.add(bag);
+
+const floor = new THREE.Mesh(new THREE.CircleGeometry(CONFIG.BAG.W*4, 64), new THREE.MeshStandardMaterial({ color: 0x0e1012, roughness: 0.95 }));
+floor.rotation.x = -Math.PI/2; floor.position.y = -CONFIG.BAG.H*0.52; scene.add(floor);
+
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let isDragging = false;
+
+/* --------------- Background & Guides --------------------- */
+function fillBackgroundColor(hex){
+  wrapCtx.save();
+  wrapCtx.fillStyle = hex; wrapCtx.fillRect(0,0,WRAP_W,WRAP_H);
+  wrapCtx.restore();
+  backgroundDataUrl = wrapCanvas.toDataURL('image/png');
+}
+async function drawBackgroundFromDataUrl(url){
+  const img = await loadImageURL(url);
+  wrapCtx.clearRect(0,0,WRAP_W,WRAP_H);
+  wrapCtx.drawImage(img, 0, 0, WRAP_W, WRAP_H);
+}
+function drawGuides(){
+  if(!guidesToggle.checked) return;
+  wrapCtx.save();
+  wrapCtx.strokeStyle = 'rgba(0,0,0,0.18)'; wrapCtx.lineWidth = 2;
+  CONFIG.PANEL_X.forEach(xx=>{ wrapCtx.beginPath(); wrapCtx.moveTo(xx,0); wrapCtx.lineTo(xx,WRAP_H); wrapCtx.stroke(); });
+  // bleed and safe
+  wrapCtx.strokeStyle = 'rgba(255,0,0,0.28)';
+  wrapCtx.strokeRect(0.5,0.5,WRAP_W-1,WRAP_H-1);
+  const b = CONFIG.BLEED_PX;
+  wrapCtx.strokeStyle = 'rgba(0,200,120,0.28)';
+  wrapCtx.strokeRect(b+0.5,b+0.5,WRAP_W-2*b-1,WRAP_H-2*b-1);
+  wrapCtx.restore();
+}
+
+/* ---------------- Sticker drawing ------------------------ */
+function redrawAll(){
+  // Redraw bg from saved snapshot (fast), else fill color
+  if(backgroundDataUrl){
+    const img = new Image();
+    img.onload = ()=>{ wrapCtx.clearRect(0,0,WRAP_W,WRAP_H); wrapCtx.drawImage(img,0,0,WRAP_W,WRAP_H); drawAllStickers(); };
+    img.src = backgroundDataUrl;
+  }else{
+    fillBackgroundColor(bgColor.value);
+    drawAllStickers();
+  }
+}
+function drawAllStickers(){
+  stickers.forEach(s=> drawStickerUV(s));
+  drawGuides();
+  wrapTexture.needsUpdate = true;
+  refreshFlatDisplay();
+  saveState();
+}
+function drawStickerUV(s){
+  const W=WRAP_W,H=WRAP_H;
+  const desiredW = W * s.s;
+  const scale = desiredW / s.w;
+  const w = s.w * scale, h = s.h * scale;
+  const cx = s.u * W, cy = (1.0 - s.v) * H;
+  wrapCtx.save();
+  wrapCtx.translate(cx, cy);
+  wrapCtx.rotate((s.r * Math.PI)/180);
+  wrapCtx.drawImage(s.img, -w/2, -h/2, w, h);
+  wrapCtx.restore();
+}
+
+/* ----------------- Image helpers ------------------------- */
+function loadImageFile(file){
+  return new Promise((resolve,reject)=>{
+    const img = new Image();
+    img.onload=()=>resolve(img);
+    img.onerror=reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+function loadImageURL(url){
+  return new Promise((resolve,reject)=>{
+    const img = new Image();
+    img.onload=()=>resolve(img);
+    img.onerror=reject;
+    img.src = url;
+  });
+}
+function dataURL(img){
+  const c = document.createElement('canvas'); c.width=img.naturalWidth; c.height=img.naturalHeight;
+  const ctx=c.getContext('2d'); ctx.drawImage(img,0,0);
+  return c.toDataURL('image/png');
+}
+
+/* ------------ UI: Background controls -------------------- */
+bgInput.addEventListener('change', async (e)=>{
+  const f = e.target.files?.[0]; if(!f) return;
+  const img = await loadImageFile(f);
+  // cover
+  const scale = Math.max(WRAP_W/img.naturalWidth, WRAP_H/img.naturalHeight);
+  const w = img.naturalWidth*scale, h = img.naturalHeight*scale;
+  const x = (WRAP_W-w)/2, y=(WRAP_H-h)/2;
+  wrapCtx.clearRect(0,0,WRAP_W,WRAP_H);
+  wrapCtx.drawImage(img, x,y,w,h);
+  backgroundDataUrl = wrapCanvas.toDataURL('image/png');
+  drawAllStickers();
+  toast('Background set ✔');
+});
+bgColor.addEventListener('input', ()=>{
+  backgroundDataUrl = null; // will use solid color
+  fillBackgroundColor(bgColor.value);
+  drawAllStickers();
+});
+exampleBgBtn.addEventListener('click', ()=>{
+  // generate a simple gradient pattern example
+  const g = wrapCtx.createLinearGradient(0,0,WRAP_W,WRAP_H);
+  g.addColorStop(0,'#f8fafb'); g.addColorStop(1,'#e6ecef');
+  wrapCtx.fillStyle=g; wrapCtx.fillRect(0,0,WRAP_W,WRAP_H);
+  // subtle dots
+  wrapCtx.fillStyle='#d5dadd';
+  for(let y=0;y<WRAP_H;y+=60){ for(let x= (y/60)%2?30:0; x<WRAP_W; x+=60){
+    wrapCtx.beginPath(); wrapCtx.arc(x,y,2,0,Math.PI*2); wrapCtx.fill();
+  }}
+  backgroundDataUrl = wrapCanvas.toDataURL('image/png');
+  drawAllStickers();
+});
+clearBgBtn.addEventListener('click', ()=>{
+  backgroundDataUrl = null;
+  fillBackgroundColor('#ffffff');
+  drawAllStickers();
+  toast('Background cleared');
+});
+
+/* ------------- UI: Stickers & transforms ----------------- */
+stickerInput.addEventListener('change', async (e)=>{
+  const f = e.target.files?.[0]; if(!f) return;
+  const img = await loadImageFile(f);
+  const id = crypto.randomUUID();
+  const src = dataURL(img);
+  const s = { id, img, src, u:0.5, v:0.5, s:parseFloat(sizeSlider.value), r:parseFloat(rotateSlider.value), w:img.naturalWidth, h:img.naturalHeight };
+  stickers.push(s);
+  activeStickerId = id;
+  refreshStickerList(); drawAllStickers();
+  updateDPINote(s);
+});
+sizeSlider.addEventListener('input', ()=>{
+  const s = getActive(); if(!s) return;
+  s.s = parseFloat(sizeSlider.value);
+  drawAllStickers(); updateDPINote(s);
+});
+rotateSlider.addEventListener('input', ()=>{
+  const s = getActive(); if(!s) return;
+  s.r = parseFloat(rotateSlider.value);
+  drawAllStickers();
+});
+deleteStickerBtn.addEventListener('click', ()=>{
+  const i = stickers.findIndex(x=>x.id===activeStickerId);
+  if(i>=0) stickers.splice(i,1);
+  activeStickerId = stickers[0]?.id ?? null;
+  refreshStickerList(); drawAllStickers(); dpiNote.textContent='';
+});
+clearAllBtn.addEventListener('click', ()=>{
+  stickers = []; activeStickerId = null;
+  refreshStickerList(); drawAllStickers(); dpiNote.textContent='';
+});
+
+/* ----------------- DPI helper note ----------------------- */
+function updateDPINote(s){
+  // printed width (inches) = (s.s * WRAP_W) / exportDPI; at 300 default.
+  const dpi = parseInt(dpiSelect.value,10);
+  const printedW_in = (s.s * WRAP_W) / dpi;
+  const requiredPx = printedW_in * 300; // target 300dpi source
+  const ok = s.w >= requiredPx * 0.9;
+  dpiNote.textContent = `Active sticker: source ${s.w}×${s.h}px → prints ~${printedW_in.toFixed(2)}" wide @ ${dpi} DPI ${ok?'✓':'(low resolution ⚠)'}`;
+}
+
+/* ----------------- 3D ↔ Flat view ------------------------ */
+flatToggle.addEventListener('change', ()=>{
+  if(flatToggle.checked){ // show flat
+    flatCanvas.style.display='block';
+  }else{
+    flatCanvas.style.display='none';
+  }
+  refreshFlatDisplay();
+});
+function refreshFlatDisplay(){
+  if(!flatToggle.checked) return;
+  displayCtx.clearRect(0,0,flatCanvas.width, flatCanvas.height);
+  // fit wrapCanvas into flatCanvas
+  const r = Math.min(flatCanvas.width/WRAP_W, flatCanvas.height/WRAP_H);
+  const w = WRAP_W*r, h = WRAP_H*r;
+  const x = (flatCanvas.width - w)/2, y = (flatCanvas.height - h)/2;
+  displayCtx.fillStyle = '#ffffff'; displayCtx.fillRect(0,0,flatCanvas.width, flatCanvas.height);
+  displayCtx.drawImage(wrapCanvas, x, y, w, h);
+}
+
+/* ----------------- Mailto links -------------------------- */
+function buildMailto(){
+  const subject = encodeURIComponent('Custom Coffee Bag Wrap Order');
+  const body = encodeURIComponent(
+`Hi team,
+
+I used the Wrap Builder and attached:
+- coffee-bag-preview.png (3D preview)
+- coffee-bag-wrap.png (flat wrap)
+
+Notes:
+- Bag size: 12 oz
+- Quantity:
+- Special instructions:
+
+Thanks!`);
+  return `mailto:${CONFIG.EMAIL}?subject=${subject}&body=${body}`;
+}
+function refreshMailto(){
+  const href = buildMailto();
+  if(mailtoLink)  mailtoLink.href = href;
+  if(mailtoLink2) mailtoLink2.href = href;
+}
+refreshMailto();
+
+/* ---------------- Downloads & ZIP ------------------------ */
+downloadPreviewBtn.addEventListener('click', ()=>{
+  const url = renderer.domElement.toDataURL('image/png');
+  downloadURL(url, 'coffee-bag-preview.png');
+  toast('3D preview downloaded ✓');
+});
+downloadWrapBtn.addEventListener('click', ()=>{
+  const url = wrapCanvas.toDataURL('image/png');
+  downloadURL(url, 'coffee-bag-wrap.png');
+  toast('Flat wrap downloaded ✓');
+});
+downloadZipBtn.addEventListener('click', async ()=>{
+  const zip = new JSZip();
+  const preview = renderer.domElement.toDataURL('image/png').split(',')[1];
+  const wrap = wrapCanvas.toDataURL('image/png').split(',')[1];
+  zip.file('coffee-bag-preview.png', preview, {base64:true});
+  zip.file('coffee-bag-wrap.png', wrap, {base64:true});
+  const blob = await zip.generateAsync({type:'blob'});
+  const url = URL.createObjectURL(blob);
+  downloadURL(url, 'wrap-assets.zip');
+  toast('ZIP downloaded ✓');
+});
+
+/* ----------------- Drag on bag (UV) ---------------------- */
+renderer.domElement.addEventListener('pointerdown', (e)=>{
+  const s=getActive(); if(!s) return;
+  const uv = pickUV(e); if(!uv) return;
+  s.u = uv.x; s.v = uv.y; drawAllStickers(); isDragging = true;
+});
+renderer.domElement.addEventListener('pointermove', (e)=>{
+  if(!isDragging) return;
+  const s=getActive(); if(!s) return;
+  const uv = pickUV(e); if(!uv) return;
+  s.u = uv.x; s.v = uv.y; drawAllStickers();
+});
+window.addEventListener('pointerup', ()=> isDragging=false);
+
+function pickUV(e){
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  const hit = raycaster.intersectObject(bag, false)[0];
+  if(!hit || !hit.uv) return null;
+  return hit.uv;
+}
+
+/* ---------------- Sticker list UI ------------------------ */
+function refreshStickerList(){
+  stickerList.innerHTML='';
+  stickers.forEach(s=>{
+    const btn = document.createElement('button');
+    btn.className = (s.id===activeStickerId)?'active':'';
+    const img = document.createElement('img'); img.src = s.src;
+    btn.appendChild(img);
+    btn.onclick = ()=>{ activeStickerId = s.id; sizeSlider.value=s.s; rotateSlider.value=s.r; updateDPINote(s); refreshStickerList(); };
+    stickerList.appendChild(btn);
+  });
+}
+
+/* ----------------- Utilities ----------------------------- */
+function getActive(){ return stickers.find(s=>s.id===activeStickerId) || null; }
+function downloadURL(url, name){
+  const a = document.createElement('a'); a.href=url; a.download=name; a.click();
+  setTimeout(()=> URL.revokeObjectURL(url), 5000);
+}
+function toast(msg){
+  toastEl.textContent = msg; toastEl.classList.add('show');
+  clearTimeout(toastEl._t); toastEl._t = setTimeout(()=> toastEl.classList.remove('show'), 1600);
+}
+
+/* ----------------- DPI scaling toggle -------------------- */
+function setDPI(dpi){
+  // We render at base 300dpi canvas (for quality), but the "dpi" affects warnings and optional downscale on download
+  // For simplicity, we keep WRAP_W/H constant in-canvas (best fidelity) and only use dpi for DPI messages.
+  saveState();
+}
+
+/* ----------------- Paper texture (visual only) ----------- */
+let paperTex = null;
+async function ensurePaperTexture(){
+  if(paperTex) return paperTex;
+  // Tiny procedural noise
+  const c = document.createElement('canvas'); c.width=512; c.height=512; const ctx=c.getContext('2d');
+  const imgData = ctx.createImageData(512,512);
+  for(let i=0;i<imgData.data.length;i+=4){
+    const n = 235 + Math.random()*20;
+    imgData.data[i]=imgData.data[i+1]=imgData.data[i+2]=n; imgData.data[i+3]=255;
+  }
+  ctx.putImageData(imgData,0,0);
+  const tex = new THREE.CanvasTexture(c); tex.wrapS=tex.wrapT=THREE.RepeatWrapping; tex.repeat.set(3,6);
+  paperTex = tex; return tex;
+}
+paperTextureToggle.addEventListener('change', async ()=>{
+  if(paperTextureToggle.checked){
+    const t = await ensurePaperTexture();
+    mat.map = wrapTexture; mat.normalMap = t; mat.needsUpdate = true;
+  }else{
+    mat.normalMap = null; mat.needsUpdate = true;
+  }
+});
+
+/* ----------------- Keyboard shortcuts -------------------- */
+window.addEventListener('keydown', (e)=>{
+  const s = getActive();
+  if(e.key==='Delete'){ deleteStickerBtn.click(); }
+  if(e.key.toLowerCase()==='g'){ guidesToggle.checked=!guidesToggle.checked; drawAllStickers(); }
+  if(e.key.toLowerCase()==='v'){ flatToggle.checked=!flatToggle.checked; flatToggle.dispatchEvent(new Event('change')); }
+  if(!s) return;
+  if(e.key==='='||e.key==='+'){ s.s = Math.min(1.5, s.s + 0.02); sizeSlider.value=s.s; drawAllStickers(); updateDPINote(s); }
+  if(e.key==='-'||e.key==='_'){ s.s = Math.max(0.05, s.s - 0.02); sizeSlider.value=s.s; drawAllStickers(); updateDPINote(s); }
+  if(e.key.toLowerCase()==='r'){ s.r = (s.r+15)%360; rotateSlider.value=s.r; drawAllStickers(); }
+});
+
+/* ----------------- Sections collapse --------------------- */
+document.querySelectorAll('.section > header').forEach(h=>{
+  const box = h.parentElement;
+  h.addEventListener('click', ()=>{
+    const open = box.hasAttribute('data-open');
+    document.querySelectorAll('.section').forEach(s=> s.removeAttribute('data-open'));
+    if(!open) box.setAttribute('data-open','');
+  });
+});
+const style = document.createElement('style');
+style.textContent = `.section:not([data-open]) .content{display:none}`;
+document.head.appendChild(style);
+
+/* ----------------- Resize handling ----------------------- */
+function onResize(){
+  const w = threeCanvas.clientWidth, h = threeCanvas.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w/h; camera.updateProjectionMatrix();
+  flatCanvas.width = w; flatCanvas.height = h;
+  refreshFlatDisplay();
+}
+window.addEventListener('resize', onResize);
+
+/* ----------------- Init: background, load ---------------- */
+function initBackground(){
+  if(!backgroundDataUrl){
+    fillBackgroundColor('#ffffff');
+    drawAllStickers();
+  }
+}
+await restoreState();
+refreshMailto();
+onResize();
+initBackground();
+
+/* ----------------- Render loop --------------------------- */
+(function tick(){
+  controls.update();
+  renderer.render(scene,camera);
+  requestAnimationFrame(tick);
+})();
+
+</script>
+</body>
+</html>
